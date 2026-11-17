@@ -45,7 +45,7 @@ cp .env.example .env    # then add your project endpoint and model deployment na
 pytest
 ```
 
-Expected: `8 passed`. The tests cover auto-approved and declined refunds, the human approval pause and resume, the delivery and feedback paths, and the hosted HTTP endpoint.
+Expected: `15 passed`. The tests cover auto-approved and declined refunds, terminal approval and rejection, the delivery and feedback paths, HTTP approval round trips (JSON and Inspector-style streaming), and terminal email loading from another working directory.
 
 ## Run it against Foundry
 
@@ -55,20 +55,25 @@ python main.py                                          # the four sample emails
 python main.py "Order A1031 hamper was crushed, refund please"
 ```
 
+Sample emails are loaded from `sample_emails.json` beside `main.py`, so passing the script's path from another working directory also works.
+
 For A1031 (₹4,800) the workflow pauses with `APPROVAL NEEDED`. Answer `y` or `n`, and it resumes from where it stopped.
 
 ## Debug it in Foundry Toolkit (Demo 1)
 
 1. Run `python host.py`. It listens on `http://localhost:8088/responses`.
 2. In VS Code, open Foundry Toolkit and start Agent Inspector against the local server. Send the sample emails and watch each executor run.
-3. You can also call the endpoint directly:
+3. For a large refund, use the approval controls on the `approve_refund` request. Typing a new chat message does not answer a pending approval.
+4. You can also call the endpoint directly:
 
 ```bash
 curl -X POST http://localhost:8088/responses -H "Content-Type: application/json" \
      -d '{"input": "Where is order A1030?"}'
 ```
 
-A large refund comes back as a `function_call` named `request_info`. To approve it, send a `function_call_output` with the same `call_id`, `"output": "true"`, and the first response's `previous_response_id` and `agent_session_id`. `tests/test_host.py` shows the exact request.
+A large refund comes back as an `mcp_approval_request` named `approve_refund`, which Agent Inspector recognizes as a human approval. Send an `mcp_approval_response` with `approval_request_id` set to that item's `id`, `"approve": true` (or `false` to decline), and the first response's `previous_response_id` and `agent_session_id`. `tests/test_host.py` shows the exact request.
+
+After updating from the old `request_info` protocol, restart `host.py` and click **Clear Chat** in Agent Inspector before sending a new refund request. Old paused runs use a different approval format and cannot be resumed with the new code.
 
 ## Deploy as a hosted agent
 
@@ -87,5 +92,6 @@ The simplest route for students is Foundry Toolkit's **Create Agent → hosted a
 ## Notes
 
 - `build_workflow()` returns a fresh graph each time. Workflow runs keep state, so build one per conversation.
-- The paused ticket travels inside `RefundApprovalRequest`. That's why a hosted run can resume after a restart: the host checkpoints it, and `host.py` lists the custom types it's allowed to restore.
+- `send_and_log` yields the reply as plain text first (so chat UIs like Agent Inspector display it), then the full `Ticket` as a structured output for programmatic consumers.
+- The paused ticket is serialized from `RefundApprovalRequest` into the approval's function arguments and restored with Pydantic validation. The host checkpoints it along with the workflow, and `host.py` lists the custom message types it's allowed to restore.
 - Local runs still call your cloud model, so they can incur charges.

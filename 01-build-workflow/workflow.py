@@ -13,14 +13,16 @@ Only two steps call a model. Everything else is plain, testable Python.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
+from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 from typing_extensions import Never
 
 from agent_framework import (
     Case,
+    Content,
     Default,
     Executor,
     WorkflowBuilder,
@@ -71,6 +73,12 @@ class RefundApprovalRequest:
     amount_inr: int
     ticket: Ticket  # carried in the request, so a paused run survives checkpoints and restarts
 
+    @classmethod
+    def from_content(cls, content: Content) -> RefundApprovalRequest:
+        if content.type != "function_approval_request" or content.function_call is None:
+            raise ValueError("Expected a refund function approval request.")
+        return TypeAdapter(cls).validate_python(content.function_call.parse_arguments())
+
 
 TRIAGE_INSTRUCTIONS = (
     "You triage customer emails for ChaiCart, an Indian tea shop. "
@@ -81,7 +89,9 @@ TRIAGE_INSTRUCTIONS = (
 REPLY_INSTRUCTIONS = (
     "You write short, polite replies for ChaiCart customer support. "
     "Use the decision you are given exactly; never promise anything beyond it. "
-    "Reply in the customer's language. Return JSON only with a single field: reply."
+    "Write the reply in the same language the customer's email is written in; "
+    "if you are not certain what language that is, write in English. "
+    "Return JSON only with a single field: reply."
 )
 
 
@@ -135,11 +145,18 @@ class RefundCheckExecutor(Executor):
         else:
             # Pause the workflow and ask a person.
             ticket.log.append("refund_check: waiting for human approval")
+            request = RefundApprovalRequest(
+                order_id=ticket.order_id, amount_inr=order["total_inr"], ticket=ticket
+            )
+            approval_id = f"refund_{uuid4().hex}"
             await ctx.request_info(
-                request_data=RefundApprovalRequest(
-                    order_id=ticket.order_id, amount_inr=order["total_inr"], ticket=ticket
+                request_data=Content.from_function_approval_request(
+                    id=approval_id,
+                    function_call=Content.from_function_call(
+                        call_id=approval_id, name="approve_refund", arguments=asdict(request)
+                    ),
                 ),
-                response_type=bool,
+                response_type=Content,
             )
             return
         ticket.log.append(f"refund_check: {ticket.decision}")
@@ -147,11 +164,19 @@ class RefundCheckExecutor(Executor):
 
     @response_handler
     async def on_decision(
-        self, original_request: RefundApprovalRequest, approved: bool, ctx: WorkflowContext[Ticket]
+        self, original_request: Content, response: Content, ctx: WorkflowContext[Ticket]
     ) -> None:
-        ticket = original_request.ticket
+        if (
+            response.type != "function_approval_response"
+            or type(response.approved) is not bool
+            or response.id != original_request.id
+        ):
+            raise ValueError("Expected a boolean approval response matching the pending refund.")
+        request = RefundApprovalRequest.from_content(original_request)
+        approved = response.approved
+        ticket = request.ticket
         ticket.decision = (
-            f"Refund of Rs {original_request.amount_inr} approved by a manager."
+            f"Refund of Rs {request.amount_inr} approved by a manager."
             if approved
             else "A manager reviewed this and offered a replacement instead of a refund."
         )
@@ -201,10 +226,11 @@ def build_workflow(triage_agent: Any, reply_agent: Any):
         await ctx.send_message(ticket)
 
     @executor(id="send_and_log")
-    async def send_and_log(ticket: Ticket, ctx: WorkflowContext[Never, Ticket]) -> None:
+    async def send_and_log(ticket: Ticket, ctx: WorkflowContext[Never, str | Ticket]) -> None:
         # A real system would send the email and update the CRM here.
         ticket.log.append("send_and_log: sent")
-        await ctx.yield_output(ticket)
+        await ctx.yield_output(ticket.reply)  # plain text, so chat UIs like Agent Inspector show the reply
+        await ctx.yield_output(ticket)  # the full structured ticket for programmatic consumers
 
     triage = TriageExecutor(triage_agent)
     refund_check = RefundCheckExecutor()

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from agent_framework import Agent
+from agent_framework import Agent, Content
 from agent_framework.foundry import FoundryChatClient
 from azure.identity.aio import AzureCliCredential
 
@@ -29,14 +29,16 @@ async def run_one(workflow, email: str) -> Ticket | None:
     """Run one email through the workflow, answering approval requests from the keyboard."""
     stream = workflow.run(email, stream=True)
     while True:
-        responses: dict[str, bool] = {}
+        responses: dict[str, Content] = {}
         result: Ticket | None = None
         async for event in stream:
-            if event.type == "request_info" and isinstance(event.data, RefundApprovalRequest):
-                req = event.data
+            if event.type == "request_info":
+                req = RefundApprovalRequest.from_content(event.data)
                 answer = input(f"\n  APPROVAL NEEDED · refund Rs {req.amount_inr} for {req.order_id}. Approve? [y/N] ")
-                responses[event.request_id] = answer.strip().lower().startswith("y")
-            elif event.type == "output":
+                responses[event.request_id] = event.data.to_function_approval_response(
+                    answer.strip().lower().startswith("y")
+                )
+            elif event.type == "output" and isinstance(event.data, Ticket):
                 result = event.data
         if not responses:
             return result
@@ -46,7 +48,9 @@ async def run_one(workflow, email: str) -> Ticket | None:
 
 async def main() -> None:
     load_dotenv()
-    emails = sys.argv[1:] or json.loads(Path("sample_emails.json").read_text(encoding="utf-8"))
+    emails = sys.argv[1:] or json.loads(
+        Path(__file__).resolve().with_name("sample_emails.json").read_text(encoding="utf-8")
+    )
 
     async with AzureCliCredential() as credential:
         client = FoundryChatClient(credential=credential)  # reads FOUNDRY_PROJECT_ENDPOINT and FOUNDRY_MODEL
