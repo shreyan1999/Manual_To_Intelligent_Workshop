@@ -1,0 +1,94 @@
+"""Offline tests: fake agents stand in for Foundry, so no Azure account is needed."""
+
+from __future__ import annotations
+
+import json
+import re
+from types import SimpleNamespace
+
+import pytest
+
+from workflow import RefundApprovalRequest, Ticket, build_workflow
+
+
+class FakeTriageAgent:
+    """Keyword-based stand-in for the triage agent. Returns JSON text like a real model."""
+
+    async def run(self, messages, **kwargs):
+        text = str(messages).lower()
+        match = re.search(r"\b(a\d{4})\b", text)
+        if "refund" in text or "money back" in text:
+            intent = "refund"
+        elif "where is" in text or "arrive" in text:
+            intent = "delivery"
+        else:
+            intent = "feedback"
+        payload = {"intent": intent, "order_id": match.group(1).upper() if match else None, "sentiment": "neutral"}
+        return SimpleNamespace(text=json.dumps(payload), value=None)
+
+
+class FakeReplyAgent:
+    async def run(self, messages, **kwargs):
+        decision = str(messages).split("Decision to communicate:\n", 1)[-1]
+        return SimpleNamespace(text=json.dumps({"reply": f"Dear customer, {decision}"}), value=None)
+
+
+async def run_to_end(email: str, approve: bool | None = None):
+    workflow = build_workflow(FakeTriageAgent(), FakeReplyAgent())
+    requests, outputs = [], []
+    async for event in workflow.run(email, stream=True):
+        if event.type == "request_info":
+            requests.append(event)
+        elif event.type == "output":
+            outputs.append(event.data)
+    if requests and approve is not None:
+        responses = {e.request_id: approve for e in requests}
+        async for event in workflow.run(stream=True, responses=responses):
+            if event.type == "output":
+                outputs.append(event.data)
+    return requests, outputs
+
+
+@pytest.mark.asyncio
+async def test_small_refund_is_auto_approved():
+    requests, outputs = await run_to_end("Order A1029 arrived broken, refund please")
+    assert requests == []
+    ticket: Ticket = outputs[0]
+    assert ticket.intent == "refund"
+    assert "approved automatically" in ticket.decision
+    assert ticket.reply.startswith("Dear customer")
+
+
+@pytest.mark.asyncio
+async def test_large_refund_pauses_for_a_human_and_resumes():
+    requests, outputs = await run_to_end("Hamper in order A1031 was crushed. I want my money back.", approve=True)
+    assert len(requests) == 1
+    assert isinstance(requests[0].data, RefundApprovalRequest)
+    assert requests[0].data.amount_inr == 4800
+    assert "approved by a manager" in outputs[0].decision
+    assert outputs[0].log[-1] == "send_and_log: sent"
+
+
+@pytest.mark.asyncio
+async def test_rejected_refund_offers_replacement():
+    _, outputs = await run_to_end("Hamper in order A1031 was crushed. I want my money back.", approve=False)
+    assert "replacement" in outputs[0].decision
+
+
+@pytest.mark.asyncio
+async def test_refund_outside_window_is_declined_by_code():
+    _, outputs = await run_to_end("Refund for order A1032 please")
+    assert "not possible" in outputs[0].decision
+
+
+@pytest.mark.asyncio
+async def test_delivery_question_uses_courier_status():
+    _, outputs = await run_to_end("Where is order A1030? It should arrive by now")
+    assert "Pune hub" in outputs[0].decision
+
+
+@pytest.mark.asyncio
+async def test_feedback_goes_straight_to_reply():
+    _, outputs = await run_to_end("Love the masala chai!")
+    assert outputs[0].intent == "feedback"
+    assert "send_and_log: sent" in outputs[0].log

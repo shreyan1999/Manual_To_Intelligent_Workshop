@@ -1,0 +1,11 @@
+# Module 01 · Build. Tested with Python 3.13 on 17 Nov 2026.
+agent-framework-foundry>=1.16.2
+agent-framework-foundry-hosting==1.0.0b261112   # preview package: pinned to the tested build
+azure-identity>=1.27.0
+python-dotenv>=1.2.0
+pydantic>=2.12
+
+# tests
+pytest>=9.0
+pytest-asyncio>=1.5
+httpx>=0.28

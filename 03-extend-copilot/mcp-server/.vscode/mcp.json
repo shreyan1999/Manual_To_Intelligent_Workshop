@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "chaicart-orders": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["${workspaceFolder}/server.py"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}

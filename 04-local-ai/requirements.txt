@@ -1,0 +1,10 @@
+# Module 04 · Local. Tested with Python 3.13 on 17 Nov 2026.
+# Agent Framework's Foundry Local provider is a preview package: pinned to the tested build.
+agent-framework-foundry-local==1.0.0b261106
+foundry-local-sdk>=2.5.0
+# On Windows you can use foundry-local-sdk-winml instead for wider hardware acceleration.
+# Install only one of the two: they conflict.
+
+# tests
+pytest>=9.0
+pytest-asyncio>=1.5
