@@ -2,7 +2,7 @@
   "servers": {
     "chaicart-orders": {
       "type": "stdio",
-      "command": "python",
+      "command": "G:/Workshops and Webinars/Reva University - Manual to Intelligent/.venv/Scripts/python.exe",
       "args": ["${workspaceFolder}/server.py"],
       "cwd": "${workspaceFolder}"
     }

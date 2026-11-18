@@ -36,12 +36,65 @@ pytest          # expected: 8 passed
 
 ## Use it from GitHub Copilot in VS Code
 
-1. Open **this folder** in VS Code.
-2. `.vscode/mcp.json` starts the server with `python`. If VS Code doesn't pick up your virtual environment, change `"command"` to the venv's interpreter, for example `.venv/Scripts/python.exe` on Windows or `.venv/bin/python` on macOS and Linux.
-3. Open Copilot Chat in **Agent** mode, and allow the `chaicart-orders` tools when asked.
-4. Ask: *What's the status of order A1029?* or *Queue a refund for A1031 because the hamper was crushed.*
-5. Pick **Policy Reviewer** from the agents list and ask it to review `server.py`.
-6. Type `/add-tool` and describe a new tool, for example *cancel an order that hasn't shipped*.
+### Step 1: Install the dependencies (one time)
+
+Complete **Set up and test** above. The server needs `mcp` 2.x. An older `mcp` (for example 1.x in your system Python) fails with `ModuleNotFoundError: No module named 'mcp.server.mcpserver'`.
+
+### Step 2: Open the correct folder in VS Code
+
+1. Choose **File → Open Folder…**.
+2. Select this `mcp-server` folder, the one that contains `.vscode`, `.github` and `server.py`.
+
+Don't open a parent folder. VS Code only reads `.vscode/mcp.json` and `.github/` from the folder you open, so the Policy Reviewer agent and `/add-tool` won't appear otherwise.
+
+### Step 3: Point the server at the right Python
+
+Open `.vscode/mcp.json` and set `"command"` to the interpreter of the virtual environment where you ran `pip install -r requirements.txt`:
+
+```json
+"command": "${workspaceFolder}/.venv/Scripts/python.exe",
+```
+
+- Windows: `${workspaceFolder}/.venv/Scripts/python.exe`
+- macOS and Linux: `${workspaceFolder}/.venv/bin/python`
+- If you share one virtual environment across modules, use its path instead (for example `${workspaceFolder}/../../../.venv/Scripts/python.exe`).
+
+A plain `"command": "python"` only works if the `python` on your PATH already has `mcp` 2.x installed.
+
+### Step 4: Start the MCP server
+
+1. Open `.vscode/mcp.json` and click **Start** above `"chaicart-orders"`. Alternatively, press `Ctrl+Shift+P`, run **MCP: List Servers**, select **chaicart-orders**, then choose **Start Server** (or **Restart Server** after changing the config).
+2. Wait until the status shows **Running** and the tools are listed.
+3. If it fails, choose **Show Output** in the same menu to read the error.
+
+### Step 5: Use the tools in Copilot Chat
+
+1. Open Copilot Chat (`Ctrl+Alt+I`) and set the mode to **Agent**.
+2. Click the **Tools** icon and make sure **chaicart-orders** is enabled.
+3. Ask: *What's the status of order A1029?* or *Queue a refund for A1031 because the hamper was crushed.*
+4. Click **Allow** when Copilot asks to run a tool.
+
+### Step 6: Review the tools with the Policy Reviewer agent
+
+1. In the chat agent dropdown, pick **Policy Reviewer**.
+2. Ask: *Review server.py.*
+3. It returns a numbered list of policy issues. It only reads files and never edits them.
+
+### Step 7: Add a tool with the `/add-tool` prompt
+
+1. Switch back to **Agent** mode.
+2. Type `/add-tool` and press Enter.
+3. When asked what the tool should do, answer, for example: *cancel an order that hasn't shipped*.
+4. Copilot adds the tool to `server.py`, writes tests, runs `pytest`, and summarises the change.
+
+### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `ModuleNotFoundError: No module named 'mcp.server.mcpserver'` | The interpreter in `mcp.json` has an old `mcp`. Complete Step 3, then run `pip install -r requirements.txt` in that environment. |
+| Server won't start | Check that the interpreter path in `mcp.json` exists. Use **Show Output** for details. |
+| Tools don't appear in chat | Use **Agent** mode and confirm the server shows **Running**. |
+| Policy Reviewer or `/add-tool` is missing | You opened the wrong folder. Reopen `mcp-server` (Step 2). |
 
 ## Run it over HTTP (for hosting or a Foundry agent)
 
